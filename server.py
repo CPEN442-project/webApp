@@ -176,15 +176,23 @@ def analyze_typing_behavior(events, textState):
     # Calculate average CPM across all segments
     average_cpm = total_cpm / segment_count if segment_count > 0 else 0
 
-
     significant_changes_count, average_cpm_difference = detect_significant_cpm_change(keystroke_segments)
 
 
     return {
+
+        # number of backspaces over total keystrokes
         "error_rate": error_rate,
+        # Average number of consecutive backspaces in the events
         "average_consecutive_backspaces": average_backspace_seq,
+        # Top 10 common bigrams the user used
         "most_common_ngrams": (n, most_common_ngrams),
-        "average_cpm": average_cpm
+        # average character per minute
+        "average_cpm": average_cpm,
+        # Number if Calculate significant changes in CPM through out events
+        "significant_changes_count": significant_changes_count,
+        # Average CPM difference between significant changes
+        "average_cpm_difference": average_cpm_difference,
     }
 
 
