@@ -1,7 +1,6 @@
 
 const mongoose = require('mongoose');
 const Joi = require('joi');
-const express = require('express');
 const app = express();
 // Example backend code for JWT authentication
 const jwt = require('jsonwebtoken');
@@ -161,7 +160,7 @@ const wss = new WebSocket.Server({
 
 
 // Start the HTTPS server
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 3005;
 const host = 'localhost';
 
 httpsServer.listen(port, () => {
