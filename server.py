@@ -193,6 +193,7 @@ def analyze_typing_behavior(events, textState):
         "significant_changes_count": significant_changes_count,
         # Average CPM difference between significant changes
         "average_cpm_difference": average_cpm_difference,
+        
     }
 
 
