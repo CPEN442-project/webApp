@@ -4,6 +4,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer #For text features
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 import numpy as np
+import joblib
 
 
 # Load the dataset
@@ -75,6 +76,9 @@ print(classification_report(y_test, y_pred, zero_division=0))
 
 print("\nAccuracy Score:")
 print(accuracy_score(y_test, y_pred))
+
+# Save the model
+joblib.dump(rf_classifier, 'random_forest_model.joblib')
 
 
 
