@@ -65,33 +65,33 @@ def analyze_text_ngrams(n,textState):
     return most_common_ngrams
 
 
-def calculate_cpm_for_segments(segments):
-    cpm_list = []
+def calculate_cps_for_segments(segments):
+    cps_list = []
 
     for segment in segments:
         segment_duration_seconds = sum(time_difference(segment[i], segment[i + 1]) for i in range(len(segment) - 1))
         character_count = sum(1 for event in segment if event['type'] == 'keyboard')
-        # Calculate CPM for the segment
-        cpm = (character_count / segment_duration_seconds) * 60 if segment_duration_seconds > 0 else 0
-        cpm_list.append(cpm)
+        # Calculate CPS for the segment
+        cps = (character_count / segment_duration_seconds) if segment_duration_seconds > 0 else 0
+        cps_list.append(cps)
 
-    return cpm_list
+    return cps_list
 
 
-def detect_significant_cpm_change(segments, threshold_multiplier=2):
-    cpm_list = calculate_cpm_for_segments(segments)
+def detect_significant_cps_change(segments, threshold_multiplier=2):
+    cps_list = calculate_cps_for_segments(segments)
     significant_changes_count = 0
-    total_cpm_difference = 0
+    total_cps_difference = 0
 
-    for i in range(1, len(cpm_list)):
-        cpm_difference = abs(cpm_list[i] - cpm_list[i - 1])
-        if cpm_difference > threshold_multiplier * statistics.median(cpm_list):
+    for i in range(1, len(cps_list)):
+        cps_difference = abs(cps_list[i] - cps_list[i - 1])
+        if cps_difference > threshold_multiplier * statistics.median(cps_list):
             significant_changes_count += 1
-            total_cpm_difference += cpm_difference
+            total_cps_difference += cps_difference
 
-    average_cpm_difference = total_cpm_difference / significant_changes_count if significant_changes_count > 0 else 0
+    average_cps_difference = total_cps_difference / significant_changes_count if significant_changes_count > 0 else 0
 
-    return significant_changes_count, average_cpm_difference
+    return significant_changes_count, average_cps_difference
 
 
 def segment_events(events, time_diffs):
@@ -117,15 +117,12 @@ def segment_events(events, time_diffs):
 
     return segments
 
-def analyze_typing_behavior(events, textState):
+def create_user_metrics(events, textState):
     # Initialize counters
     backspace_count = 0
     total_keystrokes = 0
     consecutive_backspaces = 0
     backspace_sequences = []
-
-    # Regular expression to capture character keys
-    char_key_regex = r"Key: ([a-zA-Z])"
 
     # Process events
     for event in events:
@@ -161,22 +158,23 @@ def analyze_typing_behavior(events, textState):
     keystroke_segments = segment_events(events, time_diffs)
 
 
-    ###### calculate average cpm ######
-    total_cpm = 0
+    ###### calculate average cps ######
+    total_cps = 0
     segment_count = 0
 
     for segment in keystroke_segments:
         segment_duration_seconds = sum(time_difference(segment[i], segment[i + 1]) for i in range(len(segment) - 1))
         character_count = sum(1 for event in segment if event['type'] == 'keyboard')
-        # Calculate CPM for the segment
-        cpm = (character_count / segment_duration_seconds) * 60 if segment_duration_seconds > 0 else 0
-        total_cpm += cpm
+        # Calculate CPS for the segment
+        cps = (character_count / segment_duration_seconds) if segment_duration_seconds > 0 else 0
+        total_cps += cps
         segment_count += 1
 
-    # Calculate average CPM across all segments
-    average_cpm = total_cpm / segment_count if segment_count > 0 else 0
+    # Calculate average CPS across all segments ()
+    average_cps = total_cps / segment_count if segment_count > 0 else 0
 
-    significant_changes_count, average_cpm_difference = detect_significant_cpm_change(keystroke_segments)
+    ###### significant cps changes count, and average cps difference between segments ######
+    significant_changes_count, average_cps_difference = detect_significant_cps_change(keystroke_segments)
 
 
     return {
@@ -187,17 +185,19 @@ def analyze_typing_behavior(events, textState):
         "average_consecutive_backspaces": average_backspace_seq,
         # Top 10 common bigrams the user used
         "most_common_ngrams": (n, most_common_ngrams),
-        # average character per minute
-        "average_cpm": average_cpm,
-        # Number if Calculate significant changes in CPM through out events
+        # average character per minute for the entire event array
+        "average_cps": average_cps,
+        # Number if Calculate significant changes in CPS through out events
         "significant_changes_count": significant_changes_count,
-        # Average CPM difference between significant changes
-        "average_cpm_difference": average_cpm_difference,
-        
+        # Average CPS difference between significant changes
+        "average_cps_difference": average_cps_difference,
+
     }
 
 
-def create_user_metrics(username):
+
+
+def create_labelled_training_data(username):
     # Ensure MongoDB connection
     if not check_db_connection(mongo_client):
         raise Exception("Failed to connect to MongoDB.")
@@ -216,11 +216,13 @@ def create_user_metrics(username):
     if username == "so":
         project_names = ["so_actual_work", "so_actual_work2"]
     elif username == "april":
-        project_names = ["april_actual_work", "april_actual_work2"]
+        project_names = ["Aj_genuine", "Aj_genuine2"]
     elif username == "aleks":
-        project_names = ["aleks", "aleks"]
+        project_names = ["Aleks_genuine"]
     elif username == "roger":
-        project_names = ["roger", "roger"]
+        project_names = ["roger_genuine", "roger_genuine2"]
+    elif username == "cheat_behaviour":
+        project_names = ["Aleks_fake_1", "Aleks_fake-2", "roger_copypasting", "roger_copypasting2", "Aj_fake_1", "Aj_fake_2","so_fake_1", "so_fake_2"]
 
     
     if username == "so":
@@ -238,7 +240,7 @@ def create_user_metrics(username):
         textState = project.get('textState', '')
 
         # Analyze typing behavior
-        user_typing_metrics = analyze_typing_behavior(keyboard_events, textState)
+        user_typing_metrics = user_typing_metrics(keyboard_events, textState)
 
         # Save the results to MongoDB or process further
         # For example, saving the result:
@@ -249,7 +251,7 @@ def create_user_metrics(username):
         #     "typing_metrics": user_typing_metrics
         # })
 
-@app.route('/analysis/project_id', methods=['GET'])
+@app.route('/analysis', methods=['GET'])
 def analyze_project():
     project_id = request.args.get('project_id')
     # http://<hostname>:<port>/analysis?project_id=<value>.
@@ -260,6 +262,70 @@ def analyze_project():
         return "Project ID not provided", 400
 
 if __name__ == '__main__':
-    username = "so"
-    create_user_metrics(username)
+    #transfer_labelled_data()
+
+
+    # username = "so"
+    # create_user_metrics(username)
     #app.run(port=3005)
+
+
+
+
+
+
+# This is one time code to transfer labelled data from one collection to another
+def transfer_labelled_data():
+    db_name = 'llmdetection'
+
+    # Source and target collection names
+    source_collection_name = 'projects'
+    target_collection_name = 'labelled_training_data'
+
+    # Connect to the database and collections
+    db = mongo_client[db_name]
+    source_collection = db[source_collection_name]
+    target_collection = db[target_collection_name]
+
+    # Define the user project names
+    user_project_mapping = {
+        "so": ["so_actual_work", "so_actual_work2"],
+        "april": ["Aj_genuine", "Aj_genuine2"],
+        "aleks": ["Aleks_genuine"],
+        "roger": ["roger_genuine", "roger_genuine2"],
+        "cheat_behaviour": ["Aleks_fake_1", "Aleks_fake-2", "roger_copypasting", "roger_copypasting2", "Aj_fake_1", "Aj_fake_2", "so_fake_1", "so_fake_2"]
+    }
+
+    for username, project_names in user_project_mapping.items():
+        # Retrieve projects for the current user
+        user_projects = source_collection.find({"title": {"$in": project_names}})
+        
+        # Set the label based on the username
+        label = "cheat" if username == "cheat_behaviour" else "genuine"
+        
+        # Duplicate each project into the target collection with the added label
+        for project in user_projects:
+            # Add the 'label' field
+            project['label'] = label
+
+            # If it's not a cheat, add the username
+            if username != "cheat_behaviour":
+                project['username'] = username
+            
+            # Insert the modified document into the target collection
+            target_collection.insert_one(project)
+
+            
+    # Verify and print the data from the target collection
+    for username, project_names in user_project_mapping.items():
+        print(f"Verifying projects for {username}:")
+        query = {"title": {"$in": project_names}}
+
+        # Add a check for the 'username' field if it's not 'cheat_behaviour'
+        if username != "cheat_behaviour":
+            query['username'] = username
+
+        saved_projects = target_collection.find(query)
+        
+        for project in saved_projects:
+            print(project)
