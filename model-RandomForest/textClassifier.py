@@ -7,15 +7,22 @@ import numpy as np
 
 
 # Load the dataset
-df = pd.read_csv('Res_fixed.csv')
-
+#df = pd.read_csv('Res_fixed.csv')
+df = pd.read_csv('Synth.csv', usecols=lambda column: column != 'ID')
 
 # Identify the features and the label
-X = df[['N_events','Median_Time','Ratio_deletes','Ratio_pastes','Length_per_event']]  # Adjust the column names
+#X = df[['N_events','Median_Time','Ratio_deletes','Ratio_pastes','Length_per_event']]  # Adjust the column names
+#X = df[['N_events', 'Final_text_length', 'N_keyboard_events', 'N_keyboard_combination_events', 'Ratio_combination', 'Average_Time', 'Median_Time', 'N_deletes', 'Ratio_deletes', 'N_pastes', 'Ratio_pastes', 'Length_per_event']]
+
+X = df.iloc[:, 1:-1]
 y = df['Label'] 
 
 # Split the dataset into training and testing sets
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Reset the indices of X_test and y_test after the split to ensure alignment
+X_test = X_test.reset_index(drop=True)
+y_test = y_test.reset_index(drop=True)
 
 # # Feature Extraction using TF-IDF
 # tfidf_vectorizer = TfidfVectorizer(max_features=5000)
