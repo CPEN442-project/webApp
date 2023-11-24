@@ -15,6 +15,8 @@ import difflib
 import logging
 import traceback  # Add this import at the beginning of your script
 from bson import ObjectId  # This is needed to handle ObjectId types
+import csv
+import os
 
 # Global constants for keystrokes
 BACKSPACE = 'BACKSPACE'
@@ -55,6 +57,34 @@ def retrieve_user_projects(db, collection_name):
 
     collection = db[collection_name]
     return collection.find()
+
+
+def convert_segment_metrics_to_csv(training_segment_metrics, filename="segment_metrics.csv"):
+    if not training_segment_metrics:
+        print("No data available to write to CSV.")
+        return
+
+    # Open the file in write mode
+    with open(filename, mode='w', newline='', encoding='utf-8') as file:
+        writer = None
+
+        for segment_metrics in training_segment_metrics:
+            for segment in segment_metrics:
+                if isinstance(segment, dict):
+                    # Initialize the CSV DictWriter with fieldnames from the first segment
+                    if writer is None:
+                        fieldnames = segment.keys()
+                        writer = csv.DictWriter(file, fieldnames=fieldnames)
+                        writer.writeheader()
+                
+                    writer.writerow(segment)
+
+
+    print(f"CSV file '{filename}' created successfully.")
+
+# Example usage
+# Assuming you have a 'segment_metrics' array from your function
+# convert_to_csv(segment_metrics)
 
 
 
@@ -715,6 +745,10 @@ def create_user_metrics(title, keyboard_events, project=None):
             # Add cheat flag to the segment metric
             segment_metric['is_cheat_segment'] = segments_cheat_flags[idx]
 
+            # Add project title and project_id to the segment metric
+            segment_metric['title'] = project['title']
+            segment_metric['project_id'] = str(project['_id'])
+
             segment_metrics.append(segment_metric)
 
             for metric in weighted_metrics:
@@ -763,9 +797,14 @@ def create_labelled_training_data():
         db = mongo_client[db_name]
         collection = db[collection_name]
 
+        training_data_collection = db['training_data']
+        analysis_collection = db['analysis']
+
         # Retrieve user projects
         user_projects = retrieve_user_projects(db, collection_name)
 
+        training_segment_metrics = []
+        all_overall_metrics = []
         for project in user_projects:
             if 'events' not in project:
                 continue  # Skip if there are no events
@@ -792,6 +831,26 @@ def create_labelled_training_data():
                 }
             }
             collection.update_one(update_query, update_data)
+
+            # combine all segment metrics
+            training_segment_metrics.append(segment_metrics)
+            all_overall_metrics.append(overall_metrics)
+
+
+        training_data = {
+            '$set': {
+                'training_segment_metrics': training_segment_metrics,
+                'all_overall_metrics': all_overall_metrics,
+            }
+        }
+
+
+        training_data_version = "v1.0.0"
+        training_query = {'version' : training_data_version}
+        training_data_collection.update_one(training_query, training_data, upsert=True)
+
+        convert_segment_metrics_to_csv(training_segment_metrics, f"model_and_data/training_segment_metrics.csv")
+        convert_segment_metrics_to_csv(all_overall_metrics, f"model_and_data/all_overall_metrics.csv")
 
     except Exception as e:
         logger.error(f"Error in create_labelled_training_data {title} : {e}")
@@ -823,11 +882,12 @@ if __name__ == '__main__':
         ]
     }
 
-    # transfer_labelled_data(user_project_mapping)
+    #transfer_labelled_data(user_project_mapping)
 
 
-    #create_labelled_training_data()
+    create_labelled_training_data()
 
+    
     # # Initialize the classifier
     # classifier = UserBehaviorClassifier('Synth.csv') # Model already add "model_and_data/" in the path
 
