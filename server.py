@@ -819,10 +819,18 @@ def analysis(project_id):
         # Calculate weighted cheat detection score
         weighted_cheat_detection_score = (1 - predictions['weighted_prob'].sum()) * 100
 
-        
+
+        # Merge predictions with original segment metrics
+        # Ensure the indices align before merging
+        segment_metrics_df_ORIGIN = segment_metrics_df_ORIGIN.reset_index(drop=True)
+        predictions = predictions.reset_index(drop=True)
+        merged_segment_metrics = pd.concat([segment_metrics_df_ORIGIN, predictions[['Predictions', 'Predicted_Probability', 'weight']]], axis=1)
+
+        # Convert merged DataFrame to a list of dictionaries
+        merged_segment_metrics_dict = merged_segment_metrics.to_dict(orient='records')
+
 
         analysis_collection = "analysis"
-
         localTest = False
         if localTest:
             # Save the segment metrics to CSV
@@ -838,8 +846,9 @@ def analysis(project_id):
                 "$set" : {
                     "project_id": project_id,
                     "title": project['title'],
-                    "predictions": predictions[['Predictions', 'Predicted_Probability', 'weight']].to_json(orient='records'),
+                    "predictions": predictions[['Predictions', 'Predicted_Probability', 'weight']].to_dict(orient='records'),
                     "cheat_detection_score": weighted_cheat_detection_score,
+                    "segment_metrics_predict" : merged_segment_metrics_dict,
                 }
             }
             analysis_collection.update_one({"project_id": project_id}, update_data, upsert=True)
