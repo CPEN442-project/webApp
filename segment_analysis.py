@@ -249,26 +249,37 @@ def transfer_labelled_data(user_project_mapping):
                 # Update query to find the document
                 query = {"title": project["title"]}
 
+                project_copy = project.copy()
+                # Remove the '_id' field from the copy
+                project_copy.pop('_id', None)
+
+
                 # Update the document with additional fields
                 update = {"$set": {"label": label}}
+                project_copy["label"] = label
+
 
                 if username in ["complete_cheat", "partial_cheat"]:
-                    update["$set"]["cheat_type"] = username
+                    #update["$set"]["cheat_type"] = username
+                    project_copy["cheat_type"] = username
 
                 if username == "partial_cheat":
                     # Find the corresponding project in project_names to get cheat periods
                     cheat_project = next((item for item in project_names if item['title'] == project["title"]), None)
                     if cheat_project:
-                        update["$set"]["cheat_periods"] = cheat_project.get("cheat_periods", [])
+                        #update["$set"]["cheat_periods"] = cheat_project.get("cheat_periods", [])
+                        project_copy["cheat_periods"] = cheat_project.get("cheat_periods", [])
 
                 if username not in ["complete_cheat", "partial_cheat"]:
-                    update["$set"]["username"] = username
+                    #update["$set"]["username"] = username
+                    project_copy["username"] = username
+
+                # copy all the fields from the project to the project_copy by using "$set"
+                update = {"$set": project_copy}
 
                 # Update or insert the document in the target collection
                 target_collection.update_one(query, update, upsert=True)
 
-
-        print("Verification of newly added titles complete.")
     except Exception as e:
         print("Error in transfer_labelled_data: ", e)
         traceback.print_exc()  # This prints the traceback of the exception
@@ -846,33 +857,21 @@ def create_labelled_training_data():
         }
 
 
-        training_data_version = "v1.0.0"
+        training_data_version = "v1.0.1"
         training_query = {'version' : training_data_version}
         training_data_collection.update_one(training_query, training_data, upsert=True)
 
-        convert_training_segment_metrics_to_csv(training_segment_metrics, f"model_and_data/training_segment_metrics.csv")
-        convert_training_segment_metrics_to_csv(all_overall_metrics, f"model_and_data/all_overall_metrics.csv")
+        convert_training_segment_metrics_to_csv(training_segment_metrics, f"model_and_data/training_segment_metrics_{training_data_version}.csv")
+        convert_training_segment_metrics_to_csv(all_overall_metrics, f"model_and_data/all_overall_metrics_{training_data_version}.csv")
 
     except Exception as e:
         logger.error(f"Error in create_labelled_training_data {title} : {e}")
         traceback.print_exc()  # This prints the traceback of the exception
 
-
-
-@app.route('/analysis', methods=['GET'])
-def classify_project():
-    project_id = request.args.get('project_id')
-    # http://<hostname>:<port>/analysis?project_id=<value>.
-    if project_id:
-        result = perform_analysis(project_id)
-        return result
-    else:
-        return "Project ID not provided", 400
-
 if __name__ == '__main__':
     # Define the user project names
     user_project_mapping = {
-        "so": ["so_actual_work", "so_actual_work2"],
+        "so": ["so_actual_work", "so_actual_work2", "so_actual_work3"],
         "april": ["Aj_genuine", "Aj_genuine2"],
         # "aleks": ["Aleks_genuine"], this project has no event
         "roger": ["roger_genuine", "roger_genuine2"],
@@ -883,14 +882,14 @@ if __name__ == '__main__':
         ]
     }
 
-    # transfer_labelled_data(user_project_mapping)
+    transfer_labelled_data(user_project_mapping)
 
-
-    # create_labelled_training_data()
+    # This creates the training CSV file
+    create_labelled_training_data()
 
     
     # Initialize the classifier
-    classifier = UserBehaviorClassifier(model_version="v1.0.0")
+    classifier = UserBehaviorClassifier(model_version="v1.0.1")
 
     
     # Final_text_length	N_keyboard_events	N_keyboard_comb_events	Ratio_combination	N_delete_events	Ratio_delete	N_paste_events	N_copy_events	Ratio_pastes	Length_per_event	error_rate	average_consecutive_backspaces	cps	average_thinking_time	pause_frequency	is_cheat_segment

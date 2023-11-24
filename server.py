@@ -768,11 +768,13 @@ def analysis(project_id):
         # start_time	segment_duration	text_state_change  title	project_id
         ignore_columns = ['start_time', 'segment_duration', 'text_state_change', 'title', 'project_id']
 
-        #print fields in segment_metrics
-        for segment in segment_metrics:
-            print("\n\nsegment_metric : ", segment,"\n\n")
+        # #print fields in segment_metrics
+        # for segment in segment_metrics:
+        #     print("\n\nsegment_metric : ", segment,"\n\n")
     
-        classifier = UserBehaviorClassifier(model_version="v1.0.0")
+        model_threshold = 0.07
+        # Use 1.0.1 because I added actual_work3.csv to the training data
+        classifier = UserBehaviorClassifier(model_version="v1.0.1", threshold=model_threshold)
 
         # Convert segment metrics to pandas DataFrame
         segment_metrics_df = pd.DataFrame(segment_metrics)
@@ -794,7 +796,8 @@ def analysis(project_id):
         input_segment_metrics = segment_metrics_df[metrics_columns]
 
         # Check the columns just before prediction
-        print("Columns used for prediction:", input_segment_metrics.columns)
+        # print("Columns used for prediction:", input_segment_metrics.columns)
+
         # Check for null values
         if input_segment_metrics.isnull().any().any():
             raise ValueError("Null values found in input data")
@@ -807,17 +810,61 @@ def analysis(project_id):
 
         segment_metrics_df_ORIGIN = pd.DataFrame(segment_metrics_ORIGIN)
 
-        # Calculate weights based on segment durations
-        segment_metrics_df_ORIGIN['weight'] = segment_metrics_df_ORIGIN['segment_duration'] / segment_metrics_df_ORIGIN['segment_duration'].sum()
+        
+        # Calculate weights based on the number of keyboard events
+        total_keyboard_events = segment_metrics_df_ORIGIN['N_keyboard_events'].sum()
+        segment_metrics_df_ORIGIN['weight'] = segment_metrics_df_ORIGIN['N_keyboard_events'] / total_keyboard_events
 
-        # Add weights to the predictions DataFrame
+        # Add the new weights to the predictions DataFrame
         predictions['weight'] = segment_metrics_df_ORIGIN['weight']
+
+        # print("predictions['weight'] : ", predictions['weight'])
 
         # Calculate weighted prediction probabilities
         predictions['weighted_prob'] = predictions['Predicted_Probability'] * predictions['weight']
 
-        # Calculate weighted cheat detection score
-        weighted_cheat_detection_score = (1 - predictions['weighted_prob'].sum()) * 100
+        # # Calculate weighted cheat detection score
+        # # This is depricated because it did not make the score based on how close the prediction probability is to the threshold
+        # weighted_cheat_detection_score = (1 - predictions['weighted_prob'].sum()) * 100
+
+
+        
+        # # Classify each segment and calculate a score
+        # # Score reflects how much each segment deviates from the threshold
+        # predictions['segment_score'] = predictions.apply(
+        #     lambda x: (x['Predicted_Probability'] - model_threshold) * x['weight'] if x['Predicted_Probability'] >= model_threshold else (model_threshold - x['Predicted_Probability']) * x['weight'], axis=1)
+
+        # # Calculate the weighted cheat detection score
+        # weighted_cheat_detection_score = predictions['segment_score'].sum() * 100
+
+        
+
+
+        # # Classify each segment and calculate a score
+        # # Segments above the threshold are classified as 'Genuine', below as 'Fake'
+        # predictions['segment_score'] = predictions.apply(
+        #     lambda x: (model_threshold - x['Predicted_Probability']) * x['weight'] * 1 if x['Predicted_Probability'] < model_threshold else (x['Predicted_Probability'] - model_threshold) * x['weight'] * -1, axis=1)
+
+        # # Normalize the weighted cheat detection score to be out of 100%
+        # total_possible_score = predictions['weight'].sum() * (1 - model_threshold)
+        # weighted_cheat_detection_score = (predictions['segment_score'].sum() / total_possible_score) * 100
+
+
+
+        # Add weights to the predictions DataFrame
+        predictions['weight'] = segment_metrics_df_ORIGIN['weight']
+
+        # Classify each segment and calculate a score
+        predictions['classified'] = predictions['Predicted_Probability'].apply(lambda x: 1 if x >= model_threshold else 0)
+        predictions['segment_score'] = predictions['classified'] * predictions['weight']
+
+        # print("predictions['classified'] : ", predictions['classified'])
+
+        # Calculate the weighted cheat detection score
+        weighted_cheat_detection_score = predictions['segment_score'].sum() * 100 / predictions['weight'].sum()
+
+
+        
 
 
         # Merge predictions with original segment metrics
@@ -830,6 +877,9 @@ def analysis(project_id):
         merged_segment_metrics_dict = merged_segment_metrics.to_dict(orient='records')
 
 
+
+        print("\nsaving the prediction result into local file, or mongoDB\n")
+
         analysis_collection = "analysis"
         localTest = False
         if localTest:
@@ -838,10 +888,19 @@ def analysis(project_id):
 
             # Save the predictions to CSV
             predictions.to_csv("model_and_data/postman_test_predictions.csv")
+
+            print("project['title'] : ", project['title'])
+            print("cheat_detection_score", weighted_cheat_detection_score, "\n")
+            # print("merged_segment_metrics_predict", merged_segment_metrics_dict)
+
             return "Analysis complete. Segment metrics and predictions saved to CSV files."
         else:
             # save the prediction result to mongoDB analysis collection
             analysis_collection = db[analysis_collection]
+            # Generate a human-readable timestamp
+            current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            # Prepare the update data with the new 'last_updated' field
             update_data = { 
                 "$set" : {
                     "project_id": project_id,
@@ -849,9 +908,14 @@ def analysis(project_id):
                     "predictions": predictions[['Predictions', 'Predicted_Probability', 'weight']].to_dict(orient='records'),
                     "cheat_detection_score": weighted_cheat_detection_score,
                     "segment_metrics_predict" : merged_segment_metrics_dict,
+                    "last_updated": current_timestamp  # Add the timestamp here
                 }
             }
             analysis_collection.update_one({"project_id": project_id}, update_data, upsert=True)
+            
+            print("project['title'] : ", project['title'])
+            print("cheat_detection_score", weighted_cheat_detection_score, "\n")
+            # print("merged_segment_metrics_predict", merged_segment_metrics_dict)
 
             return predictions[['Predictions', 'Predicted_Probability', 'weight']].to_json(orient='records')
 
@@ -859,7 +923,15 @@ def analysis(project_id):
         print("Error in analysis() : ", e)
         traceback.print_exc()  # This prints the traceback of the exception
         return f"An error occurred: {str(e)}", 500
-    
+
+def flag_segments(project_id, start_time, end_time):
+    # Connect to MongoDB
+    db = mongo_client['llmdetection']
+    collection = db['projects']
+
+    # Retrieve project data by project_id
+    project = collection.find_one({"_id": ObjectId(project_id)})
+
 
 
 """
@@ -898,6 +970,44 @@ def classify_project():
         return jsonify(result)
     else:
         return jsonify({"error": "Project ID not provided"}), 400
+    
+
+
+# @app.route('/analysis/flag_segments', methods=['POST'])  # Change method to POST to include password in request body
+# def classify_project():
+#     # Extract password from request body
+#     req_data = request.get_json()
+#     password = req_data.get('password') if req_data else None
+
+#     # Check if password is correct
+#     if password != API_PASSWORD:
+#         return jsonify({"error": "Access denied. Incorrect password."}), 403
+
+#     # Continue with the analysis if password is correct
+#     project_id = req_data.get('project_id')
+#     cheat_periods = req_data.get('cheat_periods')
+#     if project_id:
+#         pass
+#         # result = analysis(project_id)
+#         # return jsonify(result)
+#     else:
+#         return jsonify({"error": "Project ID not provided"}), 400
+    
+#     start_time = None
+#     end_time = None
+#     if isinstance(cheat_periods, list):
+#         for period in cheat_periods:
+#             # if period is a valid pair of datetime strings, use parse_time to convert them to datetime objects
+#             if len(period) == 2 and isinstance(period[0], str) and isinstance(period[1], str):
+#                 start_time = parse_time(period[0])
+#                 end_time = parse_time(period[1])
+#                 flag_segments(project_id, start_time, end_time)
+#             else:
+#                 return jsonify({"error": "Invalid cheat periods format"}), 400
+#     else:
+#         return jsonify({"error": "cheat_periods has invalid type"}), 400
+
+
     
 @app.route('/')
 def welcome():

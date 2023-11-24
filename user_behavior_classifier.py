@@ -10,7 +10,7 @@ import numpy as np
 import joblib
 
 class UserBehaviorClassifier:
-    def __init__(self, model_version="v1.0.0", test_size=0.2, random_state=42, threshold=0.5):
+    def __init__(self, model_version="v1.0.0", test_size=0.2, random_state=42, threshold=0.3):
         self.model_file = f'model_and_data/RF_model_{model_version}.joblib'
         self.test_size = test_size
         self.random_state = random_state
@@ -59,7 +59,7 @@ class UserBehaviorClassifier:
         y_pred_probability = self.model.predict_proba(segment_metrics_df)[:, 1]
 
         y_pred_binary = (y_pred_probability >= self.threshold).astype(int)
-        predictions = np.where(y_pred_binary == 1, 'Genuine', 'Fake')
+        predictions = np.where(y_pred_binary == 1, 'Fake', 'Genuine')
 
         segment_metrics_df['Predictions'] = predictions
         segment_metrics_df['Predicted_Probability'] = y_pred_probability
