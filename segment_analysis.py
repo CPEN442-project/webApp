@@ -17,6 +17,7 @@ import traceback  # Add this import at the beginning of your script
 from bson import ObjectId  # This is needed to handle ObjectId types
 import csv
 import os
+import pandas as pd
 
 # Global constants for keystrokes
 BACKSPACE = 'BACKSPACE'
@@ -59,7 +60,7 @@ def retrieve_user_projects(db, collection_name):
     return collection.find()
 
 
-def convert_segment_metrics_to_csv(training_segment_metrics, filename="segment_metrics.csv"):
+def convert_training_segment_metrics_to_csv(training_segment_metrics, filename="segment_metrics.csv"):
     if not training_segment_metrics:
         print("No data available to write to CSV.")
         return
@@ -849,8 +850,8 @@ def create_labelled_training_data():
         training_query = {'version' : training_data_version}
         training_data_collection.update_one(training_query, training_data, upsert=True)
 
-        convert_segment_metrics_to_csv(training_segment_metrics, f"model_and_data/training_segment_metrics.csv")
-        convert_segment_metrics_to_csv(all_overall_metrics, f"model_and_data/all_overall_metrics.csv")
+        convert_training_segment_metrics_to_csv(training_segment_metrics, f"model_and_data/training_segment_metrics.csv")
+        convert_training_segment_metrics_to_csv(all_overall_metrics, f"model_and_data/all_overall_metrics.csv")
 
     except Exception as e:
         logger.error(f"Error in create_labelled_training_data {title} : {e}")
@@ -882,32 +883,80 @@ if __name__ == '__main__':
         ]
     }
 
-    #transfer_labelled_data(user_project_mapping)
+    # transfer_labelled_data(user_project_mapping)
 
 
-    create_labelled_training_data()
-
-    
-    # # Initialize the classifier
-    # classifier = UserBehaviorClassifier('Synth.csv') # Model already add "model_and_data/" in the path
-
-    # # Train the model
-    # classifier.train()
-
-    # # Make predictions and print them
-    # predictions = classifier.predict()
-    # print(predictions[['Actual_Label', 'Predicted_Probability']])
-
-    # # Evaluate the model
-    # classifier.evaluate()
-
-    # # Save the model to a file
-    # classifier.save_model()
-
+    # create_labelled_training_data()
 
     
+    # Initialize the classifier
+    classifier = UserBehaviorClassifier(model_version="v1.0.0")
 
-    # username = "so"
-    #create_labelled_training_data(username)
+    
+    # Final_text_length	N_keyboard_events	N_keyboard_comb_events	Ratio_combination	N_delete_events	Ratio_delete	N_paste_events	N_copy_events	Ratio_pastes	Length_per_event	error_rate	average_consecutive_backspaces	cps	average_thinking_time	pause_frequency	is_cheat_segment
+    metrics_columns = ['Final_text_length', 'N_keyboard_events', 'N_keyboard_comb_events', 'Ratio_combination', 'N_delete_events', 'Ratio_delete', 'N_paste_events', 'N_copy_events', 'Ratio_pastes', 'Length_per_event', 'error_rate', 'average_consecutive_backspaces', 'cps', 'average_thinking_time', 'pause_frequency', 'is_cheat_segment']
+
+    # ignore these columns
+    # start_time	segment_duration	text_state_change  title	project_id
+    ignore_columns = ['start_time', 'segment_duration', 'text_state_change', 'title', 'project_id']
+
+    csv_file_path = "training_segment_metrics.csv"
+
+    from_file = True
+    prediction_mode = False
+
+    if not prediction_mode:
+        ############# For training mode: #############
+        if from_file :
+            # Option 1: Load data from CSV
+            df = classifier.load_data_from_csv(csv_file_path)
+            classifier.train(df, ignore_columns)
+            classifier.save_model()
+        else:
+            # Option 2: Load data from MongoDB
+            df = classifier.load_data_from_mongodb('your_collection_name')
+            classifier.train(df, ignore_columns)
+            classifier.save_model()
+    else:
+        ############# For prediction mode: #############
+        segment_metrics_df = pd.DataFrame(...)  # Replace with your segment metrics DataFrame
+        classifier.load_model()
+        predictions = classifier.predict(segment_metrics_df)
+        print(predictions)
+
+
 
     #app.run(port=3005)
+
+
+"""
+    
+    # Initialize the classifier
+    # classifier = UserBehaviorClassifier('Synth.csv') # Model already add "model_and_data/" in the path
+    classifier = UserBehaviorClassifier('training_segment_metrics.csv') # Model already add "model_and_data/" in the path
+
+    # Train the model
+    classifier.train()
+
+    # Make predictions and print them
+    predictions = classifier.predict()
+    print(predictions[['Actual_Label', 'Predicted_Probability']])
+
+    # Evaluate the model
+    classifier.evaluate()
+
+    # Save the model to a file
+    classifier.save_model()
+
+
+    
+    # Example usage:
+    classifier = UserBehaviorClassifier('Synth.csv')
+    classifier.train()
+    input_data = pd.DataFrame(...) # Replace with your input data in the same format as the training data
+    predictions = classifier.predict(input_data)
+    print(predictions[['Predicted_Label', 'Predicted_Probability']])
+    classifier.evaluate()
+    classifier.save_model()
+
+"""
