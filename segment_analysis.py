@@ -18,6 +18,11 @@ from bson import ObjectId  # This is needed to handle ObjectId types
 import csv
 import os
 import pandas as pd
+from scipy.stats import norm
+import seaborn as sns
+from sklearn.preprocessing import StandardScaler
+
+
 
 # Global constants for keystrokes
 BACKSPACE = 'BACKSPACE'
@@ -28,6 +33,8 @@ CMD_V = 'Cmd+V'
 CTRL_V = 'Ctrl+V'
 CMD_C = 'Cmd+C'
 CTRL_C = 'Ctrl+C'
+CMD_META = 'Cmd + META'
+CTRL_META = 'Ctrl + META'
 
 
 
@@ -105,7 +112,7 @@ def print_metrics(segment_metrics, overall_metrics):
         "Ratio_delete",
         "N_paste_events",
         "N_copy_events",
-        "Ratio_pastes",
+        "Ratio_V_over_C",
         "Length_per_event",
 
         # Extra segment Metadata
@@ -135,7 +142,7 @@ def print_metrics(segment_metrics, overall_metrics):
         "average_length_per_event",
         "ratio_combination_overall",
         "ratio_delete_overall",
-        "ratio_pastes_overall",
+        "Ratio_V_over_C_overall",
     ]
 
 
@@ -654,9 +661,9 @@ def calculate_metrics_for_segment(segment, segment_time_diffs):
         Ratio_combination = N_keyboard_comb_events / Final_text_length if Final_text_length else 0.0
         N_delete_events = float(sum(1 for event in segment if event['data'] in [BACKSPACE, DELETE]))
         Ratio_delete = N_delete_events / Final_text_length if Final_text_length else 0.0
-        N_paste_events = float(sum(1 for event in segment if event['data'] in [CMD_V, CTRL_V]))
-        N_copy_events = float(sum(1 for event in segment if event['data'] in [CMD_C, CTRL_C]))
-        Ratio_pastes = N_paste_events / N_copy_events if N_copy_events else 0.0
+        N_paste_events = float(sum(1 for event in segment if event['data'] in [CMD_V, CTRL_V, CMD_META, CTRL_META]))
+        N_copy_events = float(sum(1 for event in segment if event['data'] in [CMD_C, CTRL_C, CMD_META, CTRL_META]))
+        Ratio_V_over_C = N_paste_events / N_copy_events if N_copy_events else 0.0
         Length_per_event = Final_text_length / (N_keyboard_events + N_keyboard_comb_events) if (N_keyboard_events + N_keyboard_comb_events) else 0.0
 
         # print("\n\nsegment data")
@@ -678,7 +685,7 @@ def calculate_metrics_for_segment(segment, segment_time_diffs):
             "Ratio_delete": Ratio_delete,
             "N_paste_events": N_paste_events,
             "N_copy_events": N_copy_events,
-            "Ratio_pastes": Ratio_pastes,
+            "Ratio_V_over_C": Ratio_V_over_C,
             "Length_per_event": Length_per_event,
 
             # Extra segment Metadata
@@ -786,7 +793,7 @@ def create_user_metrics(title, keyboard_events, project=None):
             "average_length_per_event": total_final_text_length / total_N_keyboard_events if total_N_keyboard_events > 0 else 0.0,
             "ratio_combination_overall": total_N_keyboard_comb_events / total_final_text_length if total_final_text_length > 0 else 0.0,
             "ratio_delete_overall": total_N_delete_events / total_final_text_length if total_final_text_length > 0 else 0.0,
-            "ratio_pastes_overall": total_N_paste_events / total_N_copy_events if total_N_copy_events > 0 else 0.0,
+            "Ratio_V_over_C_overall": total_N_paste_events / total_N_copy_events if total_N_copy_events > 0 else 0.0,
         })
 
         return segment_metrics, overall_metrics
@@ -798,7 +805,7 @@ def create_user_metrics(title, keyboard_events, project=None):
 
 
 
-def create_labelled_training_data():
+def create_labelled_training_data(version):
     try:
         # Connect to MongoDB
         connect_to_mongodb(mongo_client)
@@ -856,17 +863,212 @@ def create_labelled_training_data():
             }
         }
 
-
-        training_data_version = "v1.0.1"
-        training_query = {'version' : training_data_version}
+        training_query = {'version' : version}
         training_data_collection.update_one(training_query, training_data, upsert=True)
 
-        convert_training_segment_metrics_to_csv(training_segment_metrics, f"model_and_data/training_segment_metrics_{training_data_version}.csv")
-        convert_training_segment_metrics_to_csv(all_overall_metrics, f"model_and_data/all_overall_metrics_{training_data_version}.csv")
+        convert_training_segment_metrics_to_csv(training_segment_metrics, f"model_and_data/training_segment_metrics_{version}.csv")
+        convert_training_segment_metrics_to_csv(all_overall_metrics, f"model_and_data/all_overall_metrics_{version}.csv")
 
     except Exception as e:
         logger.error(f"Error in create_labelled_training_data {title} : {e}")
         traceback.print_exc()  # This prints the traceback of the exception
+
+
+
+# def create_augmented_training_data(version, ignore_columns=None, num_augmented_points=1000, variance_threshold=1e-8):
+#     # Load the dataset
+#     file_path = f'model_and_data/training_segment_metrics_{version}.csv'
+#     df = pd.read_csv(file_path)
+
+#     print("\nIn create_augmented_training_data() : df columns before dropping ignore columns: ", df.columns)
+#     labels = df['is_cheat_segment']
+#     titles = df['title']
+
+#     # Flatten the ignore_columns list if it's nested
+#     if ignore_columns is not None:
+#         ignore_columns = [item for sublist in ignore_columns for item in (sublist if isinstance(sublist, list) else [sublist])]
+
+#     # Drop non-numeric columns for scaling
+#     non_numeric_columns = df.select_dtypes(include=['object', 'datetime']).columns.tolist()
+#     df_numeric = df.drop(columns=non_numeric_columns + ignore_columns, errors='ignore')
+
+#     # Scaling the numeric features
+#     scaler = StandardScaler()
+#     scaled_features = scaler.fit_transform(df_numeric)
+#     scaled_df = pd.DataFrame(scaled_features, columns=df_numeric.columns)
+
+#     augmented_data = pd.DataFrame()
+#     low_variance_features = []
+
+#     for feature in scaled_df.columns:
+#         mu, std = norm.fit(scaled_df[feature])
+
+#         # Check for low variance features
+#         if std < variance_threshold:
+#             low_variance_features.append(feature)
+#             print(f"Feature with low variance: {feature}")
+#             continue
+
+#         # Generate augmented data
+#         augmented_feature = np.random.normal(mu, std, size=num_augmented_points)
+#         augmented_feature[augmented_feature < 0] = 0  # Replace negative values with 0
+#         augmented_data[feature] = augmented_feature
+
+#     # Inverse transform to original scale
+#     inverse_transformed = scaler.inverse_transform(augmented_data)
+#     augmented_data = pd.DataFrame(inverse_transformed, columns=df_numeric.columns)
+
+#     # Add non-numeric columns to augmented data
+#     for col in non_numeric_columns:
+#         if col == 'is_cheat_segment':
+#             augmented_data[col] = np.random.choice(labels.unique(), size=num_augmented_points)
+#         elif col == 'title':
+#             augmented_data[col] = 'augmented_data'
+#         else:
+#             augmented_data[col] = np.nan  # or some default value
+
+#     # Concatenate original and augmented data
+#     combined_data = pd.concat([df, augmented_data])
+
+#     # Drop the ignore columns from combined data
+#     combined_data.drop(columns=ignore_columns, inplace=True, errors='ignore')
+
+#     combined_data.to_csv(f'model_and_data/training_segment_metrics_augmented_{version}.csv', index=False)
+
+#     print("Combined original and augmented data saved.")
+#     if low_variance_features:
+#         print("Consider reviewing or removing the following low variance features:", low_variance_features)
+
+
+
+def create_augmented_training_data(version, ignore_columns=None, num_augmented_points=1000, variance_threshold=1e-8):
+    # Load the dataset
+    file_path = f'model_and_data/training_segment_metrics_{version}.csv'
+    df = pd.read_csv(file_path)
+
+    print("\nIn create_augmented_training_data(): df columns before dropping ignore columns:", df.columns)
+    labels = df['is_cheat_segment']
+    titles = df['title']
+
+    # Flatten ignore_columns if nested
+    if ignore_columns is not None:
+        ignore_columns = [item for sublist in ignore_columns for item in (sublist if isinstance(sublist, list) else [sublist])]
+
+    # Separate the data into two groups
+    df_true = df[df['is_cheat_segment'] == True]
+    df_false = df[df['is_cheat_segment'] == False]
+
+    low_variance_features = []
+
+    # Function to process each group
+    def process_group(df_group, group_label):
+        non_numeric_columns = df_group.select_dtypes(include=['object', 'datetime']).columns.tolist()
+        df_numeric = df_group.drop(columns=non_numeric_columns + ignore_columns, errors='ignore')
+        
+        # Scaling
+        scaler = StandardScaler()
+        scaled_features = scaler.fit_transform(df_numeric)
+
+        scaled_df = pd.DataFrame(scaled_features, columns=df_numeric.columns)
+
+        augmented_data = pd.DataFrame()
+        distribution_data = pd.DataFrame(columns=['feature', 'mean', 'std', 'group'])
+
+        for feature in scaled_df.columns:
+            mu, std = norm.fit(scaled_df[feature])
+
+            def cast_boolean_columns(df):
+                for col in df.columns:
+                    if df[col].dtype == 'object' and set(df[col].unique()).issubset({True, False, np.nan}):
+                        df[col] = df[col].astype('bool')
+                return df
+
+            # Inside your loop, before concatenation
+            new_row = pd.DataFrame({'feature': [feature], 'mean': [mu], 'std': [std], 'group': [group_label]})
+            new_row = cast_boolean_columns(new_row)
+            distribution_data = cast_boolean_columns(distribution_data)
+
+            distribution_data = pd.concat([distribution_data, new_row], ignore_index=True)
+
+            
+            # Check for low variance
+            if std < variance_threshold:
+                low_variance_features.append(feature)
+                print(f"Feature with low variance: {feature}")
+
+            # Generate augmented data
+            augmented_feature = np.random.normal(mu, std, size=num_augmented_points)
+            augmented_feature[augmented_feature < 0] = 0
+            augmented_data[feature] = augmented_feature
+
+
+        # number of columns in augmented_data
+        print("\nlen(augmented_data.columns) : ", len(augmented_data.columns))
+
+        # Inverse transform
+        inverse_transformed = scaler.inverse_transform(augmented_data)
+        augmented_data = pd.DataFrame(inverse_transformed, columns=df_numeric.columns)
+        augmented_data['is_cheat_segment'] = group_label
+
+        return augmented_data, distribution_data
+
+    # Process each group
+    augmented_true, dist_true = process_group(df_true, True)
+    augmented_false, dist_false = process_group(df_false, False)
+
+    # Combine augmented data
+    augmented_combined = pd.concat([augmented_true, augmented_false])
+    distribution_data_combined = pd.concat([dist_true, dist_false])
+
+
+    # lets plot the difference in distributions between the two groups
+    print("dist_true.columns : ", dist_true.columns)
+    dist_true['group'] = 'True'
+    dist_false['group'] = 'False'
+
+    combined_distribution = pd.concat([dist_true, dist_false])
+    features = combined_distribution['feature'].unique()
+
+    # Replace sns.histplot with a different plotting strategy
+    # Example: Using simple histograms without KDE
+    for feature in features:
+        plt.figure(figsize=(10, 6))
+        subset = combined_distribution[combined_distribution['feature'] == feature]
+        plt.hist(subset[subset['group'] == 'True']['mean'], alpha=0.5, label='True')
+        plt.hist(subset[subset['group'] == 'False']['mean'], alpha=0.5, label='False')
+        plt.title(f'Distribution of {feature}')
+        plt.xlabel(f'{feature} Value')
+        plt.ylabel('Frequency')
+        plt.legend(title='Group')
+        # plt.show()
+        plt.savefig(f'model_and_data/{version}_{feature}.png')
+
+
+    # Save distribution data to CSV
+    distribution_data_combined.to_csv(f'model_and_data/distribution_data_{version}.csv', index=False)
+
+    # Add titles to augmented data
+    augmented_combined['title'] = 'augmented_data'
+
+    # Concatenate original and augmented data
+    combined_data = pd.concat([df, augmented_combined])
+
+    # Drop ignore columns
+    combined_data.drop(columns=ignore_columns, inplace=True, errors='ignore')
+
+    combined_data.to_csv(f'model_and_data/training_segment_metrics_augmented_{version}.csv', index=False)
+
+    if low_variance_features:
+        print("Consider reviewing or removing the following low variance features:", low_variance_features)
+
+    print("Distribution data and combined original and augmented data saved.")
+
+
+
+# Example usage
+# create_augmented_training_data("v1.0.1", ignore_columns=['column_to_ignore'], num_augmented_points=500)
+
+
 
 if __name__ == '__main__':
     # Define the user project names
@@ -874,37 +1076,66 @@ if __name__ == '__main__':
         "so": ["so_actual_work", "so_actual_work2", "so_actual_work3"],
         "april": ["Aj_genuine", "Aj_genuine2"],
         # "aleks": ["Aleks_genuine"], this project has no event
-        "roger": ["roger_genuine", "roger_genuine2"],
-        "complete_cheat": ["Aleks_fake_1", "Aleks_fake-2", "roger_copypasting", "roger_copypasting2", "Aj_fake_1", "Aj_fake_2", "Shift+Enter test"],
+        "roger": ["roger_genuine", "roger_genuine2", "roger_actual 3"],
+        "complete_cheat": ["Aleks_fake_1", "Aleks_fake-2", "roger_copypasting", "roger_copypasting2", "Aj_fake_1", "Aj_fake_2", "Shift+Enter test", "test_external_copy_paste", "so_copypaste_training_data", "roger_plagiraised 3"],
         "partial_cheat": [
             {"title": "so_fake_1", "cheat_periods": [["2023-11-23T04:22:36.761Z", "2023-11-23T04:17:46.109Z"]]},
             {"title": "so_fake_2", "cheat_periods": [["2023-11-23T04:41:21.182Z", "2023-11-23T04:42:36.876Z"]]}
         ]
     }
 
-    transfer_labelled_data(user_project_mapping)
-
-    # This creates the training CSV file
-    create_labelled_training_data()
+    
+    
+    # Final_text_length	N_keyboard_events	N_keyboard_comb_events	Ratio_combination	N_delete_events	Ratio_delete	N_paste_events	N_copy_events	Ratio_V_over_C	Length_per_event	error_rate	average_consecutive_backspaces	cps	average_thinking_time	pause_frequency	is_cheat_segment
+    # metrics_columns = ['Final_text_length', 'N_keyboard_events', 'N_keyboard_comb_events', 'Ratio_combination', 'N_delete_events', 'Ratio_delete', 'N_paste_events', 'N_copy_events', 'Ratio_V_over_C', 'Length_per_event', 'error_rate', 'average_consecutive_backspaces', 'cps', 'average_thinking_time', 'pause_frequency', 'is_cheat_segment']
 
     
-    # Initialize the classifier
-    classifier = UserBehaviorClassifier(model_version="v1.0.1")
 
-    
-    # Final_text_length	N_keyboard_events	N_keyboard_comb_events	Ratio_combination	N_delete_events	Ratio_delete	N_paste_events	N_copy_events	Ratio_pastes	Length_per_event	error_rate	average_consecutive_backspaces	cps	average_thinking_time	pause_frequency	is_cheat_segment
-    metrics_columns = ['Final_text_length', 'N_keyboard_events', 'N_keyboard_comb_events', 'Ratio_combination', 'N_delete_events', 'Ratio_delete', 'N_paste_events', 'N_copy_events', 'Ratio_pastes', 'Length_per_event', 'error_rate', 'average_consecutive_backspaces', 'cps', 'average_thinking_time', 'pause_frequency', 'is_cheat_segment']
+    # ignore_feature_excluded = ['Final_text_length', 'N_keyboard_events', 'Ratio_combination', 'Ratio_delete','N_paste_events' ,'N_copy_events', 'Length_per_event', 'average_consecutive_backspaces', 'cps', 'average_thinking_time', 'pause_frequency', 'is_cheat_segment', 'title', 'project_id']
 
     # ignore these columns
     # start_time	segment_duration	text_state_change  title	project_id
-    ignore_columns = ['start_time', 'segment_duration', 'text_state_change', 'title', 'project_id']
+    ignore_feature_augmented = ['start_time', 'segment_duration', 'text_state_change', 'N_keyboard_comb_events','N_delete_events', 'Ratio_V_over_C', 'error_rate' ]
 
-    csv_file_path = "training_segment_metrics.csv"
+
+    # ignore these columns
+    # start_time	segment_duration	text_state_change  title	project_id
+    # ignore_columns = ['start_time', 'segment_duration', 'text_state_change', 'title', 'project_id']
+
+    ignore_feature_augmented.extend(['title', 'project_id'])
+    ignore_columns = ignore_feature_augmented
+
+    # print("ignore_feature_augmented : ", ignore_feature_augmented)
+    # print("ignore_columns : ", ignore_columns)
+    
+    version = "v1.1.0"
+
+
+    # transfer_labelled_data(user_project_mapping)
+    
+    # # This creates the training CSV file
+    # create_labelled_training_data(version)
+
+    augmented = True
+    if augmented == True:
+        # This will use the created training CSV file to create augmented data file
+        create_augmented_training_data(version, ignore_columns=ignore_feature_augmented, num_augmented_points=500)
+        csv_file_path = f"training_segment_metrics_augmented_{version}.csv"
+    else :
+        csv_file_path = f"training_segment_metrics_{version}.csv"
+
 
     from_file = True
-    prediction_mode = False
 
-    if not prediction_mode:
+    mode = "train"
+    # mode = "predict"
+    # mode = "evaluate"
+
+
+    # Initialize the classifier
+    classifier = UserBehaviorClassifier(model_version=version)
+
+    if mode == "train":
         ############# For training mode: #############
         if from_file :
             # Option 1: Load data from CSV
@@ -916,13 +1147,20 @@ if __name__ == '__main__':
             df = classifier.load_data_from_mongodb('your_collection_name')
             classifier.train(df, ignore_columns)
             classifier.save_model()
-    else:
+
+    elif mode == "evaluate":
+        df = classifier.load_data_from_csv(csv_file_path)  # or load_data_from_mongodb
+        print("loaded df data from file : ", df.columns)
+        classifier.evaluate_model(df, ignore_columns=ignore_columns)
+
+    elif mode == "predict":
         ############# For prediction mode: #############
+        # We dont use this because this is done in server.py
+
         segment_metrics_df = pd.DataFrame(...)  # Replace with your segment metrics DataFrame
         classifier.load_model()
         predictions = classifier.predict(segment_metrics_df)
         print(predictions)
-
 
 
     #app.run(port=3005)

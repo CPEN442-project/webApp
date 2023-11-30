@@ -146,7 +146,7 @@ def print_metrics(segment_metrics, overall_metrics):
         "Ratio_delete",
         "N_paste_events",
         "N_copy_events",
-        "Ratio_pastes",
+        "Ratio_V_over_C",
         "Length_per_event",
 
         # Extra segment Metadata
@@ -176,7 +176,7 @@ def print_metrics(segment_metrics, overall_metrics):
         "average_length_per_event",
         "ratio_combination_overall",
         "ratio_delete_overall",
-        "ratio_pastes_overall",
+        "Ratio_V_over_C_overall",
     ]
 
 
@@ -686,7 +686,7 @@ def calculate_metrics_for_segment(segment, segment_time_diffs):
         Ratio_delete = N_delete_events / Final_text_length if Final_text_length else 0.0
         N_paste_events = float(sum(1 for event in segment if event['data'] in [CMD_V, CTRL_V]))
         N_copy_events = float(sum(1 for event in segment if event['data'] in [CMD_C, CTRL_C]))
-        Ratio_pastes = N_paste_events / N_copy_events if N_copy_events else 0.0
+        Ratio_V_over_C = N_paste_events / N_copy_events if N_copy_events else 0.0
         Length_per_event = Final_text_length / (N_keyboard_events + N_keyboard_comb_events) if (N_keyboard_events + N_keyboard_comb_events) else 0.0
 
         # print("\n\nsegment data")
@@ -708,7 +708,7 @@ def calculate_metrics_for_segment(segment, segment_time_diffs):
             "Ratio_delete": Ratio_delete,
             "N_paste_events": N_paste_events,
             "N_copy_events": N_copy_events,
-            "Ratio_pastes": Ratio_pastes,
+            "Ratio_V_over_C": Ratio_V_over_C,
             "Length_per_event": Length_per_event,
 
             # Extra segment Metadata
@@ -738,7 +738,7 @@ def calculate_metrics_for_segment(segment, segment_time_diffs):
         return None
 
 
-def analysis(project_id):
+def analysis(project_id, model_version="v1.1.0", model_threshold=0.3, expected_columns=[], ignore_columns=[]):
     try:
         # Connect to MongoDB
         db = mongo_client['llmdetection']
@@ -759,22 +759,12 @@ def analysis(project_id):
 
         segment_metrics_ORIGIN = segment_metrics.copy()
 
-        # Final_text_length	N_keyboard_events	N_keyboard_comb_events	Ratio_combination	N_delete_events	Ratio_delete	N_paste_events	N_copy_events	Ratio_pastes	Length_per_event	error_rate	average_consecutive_backspaces	cps	average_thinking_time	pause_frequency	is_cheat_segment
-        metrics_columns = ['Final_text_length', 'N_keyboard_events', 'N_keyboard_comb_events', 'Ratio_combination', 'N_delete_events', 'Ratio_delete', 'N_paste_events', 'N_copy_events', 'Ratio_pastes', 'Length_per_event', 'error_rate', 'average_consecutive_backspaces', 'cps', 'average_thinking_time', 'pause_frequency']
-
-        N_columns = 16 - 1 # account for the label 'is_cheat_segment' column
-
-        # ignore these columns
-        # start_time	segment_duration	text_state_change  title	project_id
-        ignore_columns = ['start_time', 'segment_duration', 'text_state_change', 'title', 'project_id']
-
         # #print fields in segment_metrics
         # for segment in segment_metrics:
         #     print("\n\nsegment_metric : ", segment,"\n\n")
     
-        model_threshold = 0.07
         # Use 1.0.1 because I added actual_work3.csv to the training data
-        classifier = UserBehaviorClassifier(model_version="v1.0.1", threshold=model_threshold)
+        classifier = UserBehaviorClassifier(model_version=model_version)
 
         # Convert segment metrics to pandas DataFrame
         segment_metrics_df = pd.DataFrame(segment_metrics)
@@ -783,17 +773,18 @@ def analysis(project_id):
         segment_metrics_df.drop(columns=ignore_columns, errors='ignore', inplace=True)
 
         # Verify that the number of columns matches N_columns
-        N_columns = 16 - 1  # account for the label 'is_cheat_segment' column
-        if len(segment_metrics_df.columns) != N_columns:
-            raise ValueError(f"Expected {N_columns} columns, but found {len(segment_metrics_df.columns)}")
-
+        # N_columns = 16 - 1  # account for the label 'is_cheat_segment' column
+        if len(expected_columns) + len(ignore_columns) != 20:
+            raise ValueError(f"Expected {20} columns, but found {len(expected_columns) + len(ignore_columns)}")
+        
         # Verify that all expected columns are present and in correct order
-        expected_columns = metrics_columns  # 'metrics_columns' should have the list of columns used during training
         if list(segment_metrics_df.columns) != expected_columns:
+            print("\nsegment_metrics_df.columns : ", segment_metrics_df.columns)
+            print("\nexpected_columns : ", expected_columns, '\n')
             raise ValueError("Column mismatch. Expected columns: {}, but found: {}".format(expected_columns, list(segment_metrics_df.columns)))
 
         # Prepare DataFrame for the model
-        input_segment_metrics = segment_metrics_df[metrics_columns]
+        input_segment_metrics = segment_metrics_df[expected_columns]
 
         # Check the columns just before prediction
         # print("Columns used for prediction:", input_segment_metrics.columns)
@@ -804,7 +795,7 @@ def analysis(project_id):
 
 
         classifier.load_model()
-        predictions = classifier.predict(input_segment_metrics)
+        predictions = classifier.predict(input_segment_metrics, threshold=model_threshold)
         print(predictions)
 
 
@@ -924,16 +915,6 @@ def analysis(project_id):
         traceback.print_exc()  # This prints the traceback of the exception
         return f"An error occurred: {str(e)}", 500
 
-def flag_segments(project_id, start_time, end_time):
-    # Connect to MongoDB
-    db = mongo_client['llmdetection']
-    collection = db['projects']
-
-    # Retrieve project data by project_id
-    project = collection.find_one({"_id": ObjectId(project_id)})
-
-
-
 """
 
         # Convert segment metrics to pandas DataFrame
@@ -959,6 +940,24 @@ def classify_project():
     req_data = request.get_json()
     password = req_data.get('password') if req_data else None
 
+
+    # These are the input values for the model
+    model_threshold = 0.3
+    model_version = "v1.1.0"
+
+    # 15 columns
+    # expected__feature_columns = ['Final_text_length', 'N_keyboard_events', 'N_keyboard_comb_events', 'Ratio_combination', 'N_delete_events', 'Ratio_delete', 'N_paste_events', 'N_copy_events', 'Ratio_V_over_C', 'Length_per_event', 'error_rate', 'average_consecutive_backspaces', 'cps', 'average_thinking_time', 'pause_frequency']
+
+    # 5 columns
+    # ignore_columns = ['start_time', 'segment_duration', 'text_state_change', 'title', 'project_id']
+
+    # 11 columns
+    expected__feature_columns = ['Final_text_length', 'N_keyboard_events', 'Ratio_combination', 'Ratio_delete','N_paste_events' ,'N_copy_events', 'Length_per_event', 'average_consecutive_backspaces', 'cps', 'average_thinking_time', 'pause_frequency']
+
+    # 9 columns
+    ignore_columns = ['start_time', 'segment_duration', 'text_state_change', 'N_keyboard_comb_events','N_delete_events', 'Ratio_V_over_C', 'error_rate', 'title', 'project_id']
+
+
     # Check if password is correct
     if password != API_PASSWORD:
         return jsonify({"error": "Access denied. Incorrect password."}), 403
@@ -966,7 +965,7 @@ def classify_project():
     # Continue with the analysis if password is correct
     project_id = req_data.get('project_id')
     if project_id:
-        result = analysis(project_id)
+        result = analysis(project_id, model_version, model_threshold, expected__feature_columns, ignore_columns)
         return jsonify(result)
     else:
         return jsonify({"error": "Project ID not provided"}), 400
