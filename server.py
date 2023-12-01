@@ -943,7 +943,7 @@ def classify_project():
 
     # These are the input values for the model
     model_threshold = 0.3
-    model_version = "v1.1.0"
+    model_version = "v1.1.1"
 
     # 15 columns
     # expected__feature_columns = ['Final_text_length', 'N_keyboard_events', 'N_keyboard_comb_events', 'Ratio_combination', 'N_delete_events', 'Ratio_delete', 'N_paste_events', 'N_copy_events', 'Ratio_V_over_C', 'Length_per_event', 'error_rate', 'average_consecutive_backspaces', 'cps', 'average_thinking_time', 'pause_frequency']
