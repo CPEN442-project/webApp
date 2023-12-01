@@ -1001,6 +1001,29 @@ def create_labelled_training_data(version):
 
 
 
+def create_normal_distribution_plot(feature, true_stats, false_stats):
+    mu_true, std_true = true_stats
+    mu_false, std_false = false_stats
+
+    # Generating x values
+    x = np.linspace(min(mu_true - 3*std_true, mu_false - 3*std_false), max(mu_true + 3*std_true, mu_false + 3*std_false), 100)
+    
+    # Plotting the true group distribution
+    plt.plot(x, norm.pdf(x, mu_true, std_true), label='True Group')
+    
+    # Plotting the false group distribution
+    plt.plot(x, norm.pdf(x, mu_false, std_false), label='False Group')
+
+    plt.title(f'Normal Distribution of {feature}')
+    plt.xlabel('Value')
+    plt.ylabel('Density')
+    plt.legend()
+
+    # Create directory for plots if it doesn't exist
+    os.makedirs(f'model_and_data/{version}_plots', exist_ok=True)
+    plt.savefig(f'model_and_data/{version}_plots/{version}_{feature}.png')
+    plt.close()
+
 
 def create_augmented_training_data(version, ignore_columns=None, num_augmented_points=1000, variance_threshold=1e-8):
     # Load the dataset
@@ -1064,12 +1087,15 @@ def create_augmented_training_data(version, ignore_columns=None, num_augmented_p
     # Function to process each group
     def process_group(df_group, group_label):
         augmented_data = pd.DataFrame()
+        stats = {}
 
         for feature in df_group.columns:
             if feature in non_numeric_columns:
                 continue  # Skip non-numeric columns
 
             mu, std = norm.fit(df_group[feature])
+
+            stats[feature] = (mu, std)
 
             # Check for low variance
             if std < variance_threshold:
@@ -1082,18 +1108,24 @@ def create_augmented_training_data(version, ignore_columns=None, num_augmented_p
             augmented_feature[augmented_feature < 0] = 0  # Replace negative values with 0
             augmented_data[feature] = augmented_feature
 
-        return augmented_data
+        return augmented_data, stats
     
 
-    
-    # Process each group
-    augmented_true = process_group(df_true_scaled, True)
-    augmented_false = process_group(df_false_scaled, False)
+    # Process each group and collect stats
+    augmented_true, stats_true = process_group(df_true_scaled, True)
+    augmented_false, stats_false = process_group(df_false_scaled, False)
+
+    # Plot distributions for each feature
+    for feature in df_numeric.columns:
+        if feature not in ignore_columns:
+            create_normal_distribution_plot(feature, stats_true.get(feature, (0, 0)), stats_false.get(feature, (0, 0)))
+
+
 
     # Combine augmented data
     augmented_combined = pd.concat([augmented_true, augmented_false])
 
-
+    
     # print("\n\n pre-inverse_transformed : ", augmented_combined)
     # print("\n\n augmented N_paste_events : ", augmented_combined['N_paste_events'][200:250])
     # print("\n\n augmented N_copy_events : ", augmented_combined['N_copy_events'][200:250])
@@ -1111,26 +1143,37 @@ def create_augmented_training_data(version, ignore_columns=None, num_augmented_p
 
 
 
+    # # Add back the non-numeric columns with the "no value" to complement for the empty augmented data rows
+    # for col in non_numeric_columns:
+    #     # Do this for only other non numeric columns other than 'is_cheat_segment'
+    #     if col != 'is_cheat_segment':
+    #         augmented_combined[col] = np.nan
+    #         augmented_combined.loc[:len(df) - 1, col] = df[col]
+
+
     # Add back the non-numeric columns with the "no value" to complement for the empty augmented data rows
     for col in non_numeric_columns:
-        # Do this for only other non numeric columns other than 'is_cheat_segment'
         if col != 'is_cheat_segment':
+            # For augmented data, we do not have values for non-numeric columns
             augmented_combined[col] = np.nan
-            augmented_combined.loc[:len(df) - 1, col] = df[col]
-
 
 
     # Fill NaNs in non-numeric columns with "no value"
     augmented_combined.fillna("no value", inplace=True)
 
     print("\n\n non-numeric added back with remaining rows with \"no value\" : ", augmented_combined)
-    print("\n\n check cheat flags between rows 480 and 520 in augmented_combined : ", augmented_combined[480:520])
+    print(f'\n\n check cheat flags between rows {num_augmented_points-20} and {num_augmented_points+20} in augmented_combined : ', augmented_combined[num_augmented_points-20:num_augmented_points+20])
 
     # Concatenate original and augmented data
     final_data = pd.concat([df, augmented_combined])
 
     print("\n\n df : ", df)
     print("\n\n augmented_combined : ", augmented_combined)
+
+    df_length = len(df)
+    print(f'\n\n check the data between df and augmented_combined between rows {df_length-20} and {df_length+20}: ', final_data[df_length-20:df_length+20])
+
+    final_data.to_csv(f'model_and_data/training_segment_metrics_all_aug_{version}.csv', index=False)
 
     # Drop ignore columns
     final_data.drop(columns=ignore_columns, inplace=True, errors='ignore')
@@ -1190,7 +1233,7 @@ if __name__ == '__main__':
     # print("ignore_feature_augmented : ", ignore_feature_augmented)
     # print("ignore_columns : ", ignore_columns)
     
-    version = "v1.1.1"
+    version = "v1.1.2"
 
 
     # transfer_labelled_data(user_project_mapping)
@@ -1201,7 +1244,7 @@ if __name__ == '__main__':
     augmented = True
     if augmented == True:
         # This will use the created training CSV file to create augmented data file
-        create_augmented_training_data(version, ignore_columns=ignore_feature_augmented, num_augmented_points=500)
+        create_augmented_training_data(version, ignore_columns=ignore_feature_augmented, num_augmented_points=200)
         csv_file_path = f"training_segment_metrics_augmented_{version}.csv"
     else :
         csv_file_path = f"training_segment_metrics_{version}.csv"
@@ -1209,9 +1252,9 @@ if __name__ == '__main__':
 
     from_file = True
 
-    mode = "train"
+    # mode = "train"
     # mode = "predict"
-    # mode = "evaluate"
+    mode = "evaluate"
 
 
     # Initialize the classifier
