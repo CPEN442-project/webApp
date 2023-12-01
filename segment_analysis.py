@@ -1196,7 +1196,7 @@ if __name__ == '__main__':
     # transfer_labelled_data(user_project_mapping)
     
     # # This creates the training CSV file
-    # create_labelled_training_data(version)
+    create_labelled_training_data(version)
 
     augmented = True
     if augmented == True:
@@ -1209,9 +1209,9 @@ if __name__ == '__main__':
 
     from_file = True
 
-    # mode = "train"
+    mode = "train"
     # mode = "predict"
-    mode = "evaluate"
+    # mode = "evaluate"
 
 
     # Initialize the classifier
