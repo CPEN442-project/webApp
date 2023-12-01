@@ -1,5 +1,5 @@
 feature,mean,std,group
-Final_text_length,1.76225876924628e-18,True,True
+Final_text_length,1.76225876924628e-18,1.0,True
 N_keyboard_events,1.76225876924628e-17,1.0000000000000004,True
 Ratio_combination,1.76225876924628e-17,1.0000000000000004,True
 Ratio_delete,2.2028234615578502e-17,0.9999999999999999,True

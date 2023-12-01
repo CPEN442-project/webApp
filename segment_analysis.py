@@ -875,69 +875,130 @@ def create_labelled_training_data(version):
 
 
 
+
 # def create_augmented_training_data(version, ignore_columns=None, num_augmented_points=1000, variance_threshold=1e-8):
 #     # Load the dataset
 #     file_path = f'model_and_data/training_segment_metrics_{version}.csv'
 #     df = pd.read_csv(file_path)
 
-#     print("\nIn create_augmented_training_data() : df columns before dropping ignore columns: ", df.columns)
+#     print("\nIn create_augmented_training_data(): df columns before dropping ignore columns:", df.columns)
 #     labels = df['is_cheat_segment']
 #     titles = df['title']
 
-#     # Flatten the ignore_columns list if it's nested
+#     # Flatten ignore_columns if nested
 #     if ignore_columns is not None:
 #         ignore_columns = [item for sublist in ignore_columns for item in (sublist if isinstance(sublist, list) else [sublist])]
 
-#     # Drop non-numeric columns for scaling
-#     non_numeric_columns = df.select_dtypes(include=['object', 'datetime']).columns.tolist()
-#     df_numeric = df.drop(columns=non_numeric_columns + ignore_columns, errors='ignore')
+#     # Separate the data into two groups
+#     df_true = df[df['is_cheat_segment'] == True]
+#     df_false = df[df['is_cheat_segment'] == False]
 
-#     # Scaling the numeric features
-#     scaler = StandardScaler()
-#     scaled_features = scaler.fit_transform(df_numeric)
-#     scaled_df = pd.DataFrame(scaled_features, columns=df_numeric.columns)
-
-#     augmented_data = pd.DataFrame()
 #     low_variance_features = []
 
-#     for feature in scaled_df.columns:
-#         mu, std = norm.fit(scaled_df[feature])
+#     # Function to process each group
+#     def process_group(df_group, group_label):
+#         non_numeric_columns = df_group.select_dtypes(include=['object', 'datetime']).columns.tolist()
+#         df_numeric = df_group.drop(columns=non_numeric_columns + ignore_columns, errors='ignore')
+        
+#         # Scaling
+#         scaler = StandardScaler()
+#         scaled_features = scaler.fit_transform(df_numeric)
 
-#         # Check for low variance features
-#         if std < variance_threshold:
-#             low_variance_features.append(feature)
-#             print(f"Feature with low variance: {feature}")
-#             continue
+#         scaled_df = pd.DataFrame(scaled_features, columns=df_numeric.columns)
 
-#         # Generate augmented data
-#         augmented_feature = np.random.normal(mu, std, size=num_augmented_points)
-#         augmented_feature[augmented_feature < 0] = 0  # Replace negative values with 0
-#         augmented_data[feature] = augmented_feature
+#         augmented_data = pd.DataFrame()
+#         distribution_data = pd.DataFrame(columns=['feature', 'mean', 'std', 'group'])
 
-#     # Inverse transform to original scale
-#     inverse_transformed = scaler.inverse_transform(augmented_data)
-#     augmented_data = pd.DataFrame(inverse_transformed, columns=df_numeric.columns)
+#         def cast_boolean_columns(df):
+#             for col in df.columns:
+#                 if col not in ['mean', 'std'] and df[col].dtype == 'object' and set(df[col].unique()).issubset({True, False, np.nan}):
+#                     df[col] = df[col].astype('bool')
+#             return df
+                
+#         # Inside your loop, before concatenation
+#         for feature in scaled_df.columns:
+#             mu, std = norm.fit(scaled_df[feature])
+#             new_row = pd.DataFrame({'feature': [feature], 'mean': [mu], 'std': [std], 'group': [group_label]})
+#             new_row = cast_boolean_columns(new_row)
+#             distribution_data = cast_boolean_columns(distribution_data)
 
-#     # Add non-numeric columns to augmented data
-#     for col in non_numeric_columns:
-#         if col == 'is_cheat_segment':
-#             augmented_data[col] = np.random.choice(labels.unique(), size=num_augmented_points)
-#         elif col == 'title':
-#             augmented_data[col] = 'augmented_data'
-#         else:
-#             augmented_data[col] = np.nan  # or some default value
+#             distribution_data = pd.concat([distribution_data, new_row], ignore_index=True)
+#             print("\n")
+#             print("distribution_data : ", distribution_data)
+#             print("\n")
+            
+#             # Check for low variance
+#             if std < variance_threshold:
+#                 low_variance_features.append(feature)
+#                 print(f"Feature with low variance: {feature}")
+
+#             # Generate augmented data
+#             augmented_feature = np.random.normal(mu, std, size=num_augmented_points)
+#             augmented_feature[augmented_feature < 0] = 0
+#             augmented_data[feature] = augmented_feature
+
+
+#         # number of columns in augmented_data
+#         print("\nlen(augmented_data.columns) : ", len(augmented_data.columns))
+
+#         # Inverse transform
+#         inverse_transformed = scaler.inverse_transform(augmented_data)
+#         augmented_data = pd.DataFrame(inverse_transformed, columns=df_numeric.columns)
+#         augmented_data['is_cheat_segment'] = group_label
+
+#         return augmented_data, distribution_data
+
+#     # Process each group
+#     augmented_true, dist_true = process_group(df_true, True)
+#     augmented_false, dist_false = process_group(df_false, False)
+
+#     # Combine augmented data
+#     augmented_combined = pd.concat([augmented_true, augmented_false])
+#     distribution_data_combined = pd.concat([dist_true, dist_false])
+
+
+#     # lets plot the difference in distributions between the two groups
+#     print("dist_true.columns : ", dist_true.columns)
+#     dist_true['group'] = 'True'
+#     dist_false['group'] = 'False'
+
+#     combined_distribution = pd.concat([dist_true, dist_false])
+#     features = combined_distribution['feature'].unique()
+
+#     # Replace sns.histplot with a different plotting strategy
+#     # Example: Using simple histograms without KDE
+#     for feature in features:
+#         plt.figure(figsize=(10, 6))
+#         subset = combined_distribution[combined_distribution['feature'] == feature]
+#         plt.hist(subset[subset['group'] == 'True']['mean'], alpha=0.5, label='True')
+#         plt.hist(subset[subset['group'] == 'False']['mean'], alpha=0.5, label='False')
+#         plt.title(f'Distribution of {feature}')
+#         plt.xlabel(f'{feature} Value')
+#         plt.ylabel('Frequency')
+#         plt.legend(title='Group')
+#         # plt.show()
+#         plt.savefig(f'model_and_data/{version}_{feature}.png')
+
+
+#     # Save distribution data to CSV
+#     distribution_data_combined.to_csv(f'model_and_data/distribution_data_{version}.csv', index=False)
+
+#     # Add titles to augmented data
+#     augmented_combined['title'] = 'augmented_data'
 
 #     # Concatenate original and augmented data
-#     combined_data = pd.concat([df, augmented_data])
+#     combined_data = pd.concat([df, augmented_combined])
 
-#     # Drop the ignore columns from combined data
+#     # Drop ignore columns
 #     combined_data.drop(columns=ignore_columns, inplace=True, errors='ignore')
 
 #     combined_data.to_csv(f'model_and_data/training_segment_metrics_augmented_{version}.csv', index=False)
 
-#     print("Combined original and augmented data saved.")
 #     if low_variance_features:
 #         print("Consider reviewing or removing the following low variance features:", low_variance_features)
+
+#     print("Distribution data and combined original and augmented data saved.")
+
 
 
 
@@ -946,123 +1007,144 @@ def create_augmented_training_data(version, ignore_columns=None, num_augmented_p
     file_path = f'model_and_data/training_segment_metrics_{version}.csv'
     df = pd.read_csv(file_path)
 
-    print("\nIn create_augmented_training_data(): df columns before dropping ignore columns:", df.columns)
-    labels = df['is_cheat_segment']
-    titles = df['title']
+    print("\n create_augmented_training_data(): initial columns", df.columns)
+    print("\n initial data types of columns : ", df.dtypes)
+    print("\n CHECK COLUMN LENGTH , len(df.columns):", len(df.columns))
 
     # Flatten ignore_columns if nested
     if ignore_columns is not None:
         ignore_columns = [item for sublist in ignore_columns for item in (sublist if isinstance(sublist, list) else [sublist])]
 
-    # Separate the data into two groups
-    df_true = df[df['is_cheat_segment'] == True]
-    df_false = df[df['is_cheat_segment'] == False]
+    # Drop non-numeric columns for scaling
+    # Object : [start_time, text_state_change, title, project_id], bool : [is_cheat_segment]
+    non_numeric_columns = df.select_dtypes(include=['object', 'datetime', 'boolean']).columns.tolist()
+    # This drops some features I selected to remove, the 3 non features (start time segment duration and text state change) and the 2 metadata (title and project_id)
+    # Features I dont use anymore : ['N_keyboard_comb_events','N_delete_events', 'Ratio_V_over_C', 'error_rate']
+    # It keeps is_cheat_segment and all other features though
+    df_numeric = df.drop(columns=non_numeric_columns + ignore_columns, errors='ignore')
+
+    # print("\n df_numeric['N_paste_events'] : ", df_numeric['N_paste_events'])
+    # print("\n df_numeric['N_copy_events'] : ", df_numeric['N_copy_events'])
+
+    # extract non-numeric columns from df
+    # df_non_numeric = df[non_numeric_columns]
+
+    # Scaling
+    scaler = StandardScaler()
+    df_numeric_scaled = scaler.fit_transform(df_numeric)
+
+    # df_scaled should be numeric columns with scaled values
+    df_scaled = pd.DataFrame(df_numeric_scaled, columns=df_numeric.columns)
+
+    # print("\n df_numeric_scaled : ", df_numeric_scaled)
+    # print("\n df_scaled : ", df_scaled)
+    # print("\n df_scaled['N_paste_events'] : ", df_scaled['N_paste_events'])
+    # print("\n df_scaled['N_copy_events'] : ", df_scaled['N_copy_events'])
+
+    # Add back the non-numeric columns
+    for col in non_numeric_columns:
+        df_scaled[col] = df[col]
+    
+    # df_scaled should now have added
+    # Object : [start_time, text_state_change, title, project_id], bool : [is_cheat_segment]
+
+
+    print("\n create_augmented_training_data(): df_scaled columns", df_scaled.columns)
+    print("\n CHECK COLUMN LENGTH , len(df_scaled.columns):", len(df_scaled.columns))
+
+    # Now separate the scaled data into two groups
+    df_true_scaled = df_scaled[df_scaled['is_cheat_segment'] == True]
+    df_false_scaled = df_scaled[df_scaled['is_cheat_segment'] == False]
+
+    print("\n df_true_scaled : ", df_true_scaled)
+    print("\n df_false_scaled : ", df_false_scaled)
 
     low_variance_features = []
 
     # Function to process each group
     def process_group(df_group, group_label):
-        non_numeric_columns = df_group.select_dtypes(include=['object', 'datetime']).columns.tolist()
-        df_numeric = df_group.drop(columns=non_numeric_columns + ignore_columns, errors='ignore')
-        
-        # Scaling
-        scaler = StandardScaler()
-        scaled_features = scaler.fit_transform(df_numeric)
-
-        scaled_df = pd.DataFrame(scaled_features, columns=df_numeric.columns)
-
         augmented_data = pd.DataFrame()
-        distribution_data = pd.DataFrame(columns=['feature', 'mean', 'std', 'group'])
 
-        for feature in scaled_df.columns:
-            mu, std = norm.fit(scaled_df[feature])
+        for feature in df_group.columns:
+            if feature in non_numeric_columns:
+                continue  # Skip non-numeric columns
 
-            def cast_boolean_columns(df):
-                for col in df.columns:
-                    if df[col].dtype == 'object' and set(df[col].unique()).issubset({True, False, np.nan}):
-                        df[col] = df[col].astype('bool')
-                return df
+            mu, std = norm.fit(df_group[feature])
 
-            # Inside your loop, before concatenation
-            new_row = pd.DataFrame({'feature': [feature], 'mean': [mu], 'std': [std], 'group': [group_label]})
-            new_row = cast_boolean_columns(new_row)
-            distribution_data = cast_boolean_columns(distribution_data)
-
-            distribution_data = pd.concat([distribution_data, new_row], ignore_index=True)
-
-            
             # Check for low variance
             if std < variance_threshold:
                 low_variance_features.append(feature)
-                print(f"Feature with low variance: {feature}")
+                # low variance features are printed at the end of this function
+                # print(f"Feature with low variance: {feature}")
 
             # Generate augmented data
             augmented_feature = np.random.normal(mu, std, size=num_augmented_points)
-            augmented_feature[augmented_feature < 0] = 0
+            augmented_feature[augmented_feature < 0] = 0  # Replace negative values with 0
             augmented_data[feature] = augmented_feature
 
+        return augmented_data
+    
 
-        # number of columns in augmented_data
-        print("\nlen(augmented_data.columns) : ", len(augmented_data.columns))
-
-        # Inverse transform
-        inverse_transformed = scaler.inverse_transform(augmented_data)
-        augmented_data = pd.DataFrame(inverse_transformed, columns=df_numeric.columns)
-        augmented_data['is_cheat_segment'] = group_label
-
-        return augmented_data, distribution_data
-
+    
     # Process each group
-    augmented_true, dist_true = process_group(df_true, True)
-    augmented_false, dist_false = process_group(df_false, False)
+    augmented_true = process_group(df_true_scaled, True)
+    augmented_false = process_group(df_false_scaled, False)
 
     # Combine augmented data
     augmented_combined = pd.concat([augmented_true, augmented_false])
-    distribution_data_combined = pd.concat([dist_true, dist_false])
 
 
-    # lets plot the difference in distributions between the two groups
-    print("dist_true.columns : ", dist_true.columns)
-    dist_true['group'] = 'True'
-    dist_false['group'] = 'False'
+    # print("\n\n pre-inverse_transformed : ", augmented_combined)
+    # print("\n\n augmented N_paste_events : ", augmented_combined['N_paste_events'][200:250])
+    # print("\n\n augmented N_copy_events : ", augmented_combined['N_copy_events'][200:250])
 
-    combined_distribution = pd.concat([dist_true, dist_false])
-    features = combined_distribution['feature'].unique()
+    # Inverse transform to original scale for the combined augmented data
+    inverse_transformed = scaler.inverse_transform(augmented_combined)
+    augmented_combined = pd.DataFrame(inverse_transformed, columns=augmented_combined.columns)
 
-    # Replace sns.histplot with a different plotting strategy
-    # Example: Using simple histograms without KDE
-    for feature in features:
-        plt.figure(figsize=(10, 6))
-        subset = combined_distribution[combined_distribution['feature'] == feature]
-        plt.hist(subset[subset['group'] == 'True']['mean'], alpha=0.5, label='True')
-        plt.hist(subset[subset['group'] == 'False']['mean'], alpha=0.5, label='False')
-        plt.title(f'Distribution of {feature}')
-        plt.xlabel(f'{feature} Value')
-        plt.ylabel('Frequency')
-        plt.legend(title='Group')
-        # plt.show()
-        plt.savefig(f'model_and_data/{version}_{feature}.png')
+    # print("\n\n after-inverse_transformed : ", augmented_combined)
+    # print("\n\n augmented N_paste_events : ", augmented_combined['N_paste_events'][200:250])
+    # print("\n\n augmented N_copy_events : ", augmented_combined['N_copy_events'][200:250])
+
+    # Add labels and non-numeric data to augmented_combined
+    augmented_combined['is_cheat_segment'] = np.concatenate([np.repeat(True, len(augmented_true)), np.repeat(False, len(augmented_false))])
 
 
-    # Save distribution data to CSV
-    distribution_data_combined.to_csv(f'model_and_data/distribution_data_{version}.csv', index=False)
 
-    # Add titles to augmented data
-    augmented_combined['title'] = 'augmented_data'
+    # Add back the non-numeric columns with the "no value" to complement for the empty augmented data rows
+    for col in non_numeric_columns:
+        # Do this for only other non numeric columns other than 'is_cheat_segment'
+        if col != 'is_cheat_segment':
+            augmented_combined[col] = np.nan
+            augmented_combined.loc[:len(df) - 1, col] = df[col]
+
+
+
+    # Fill NaNs in non-numeric columns with "no value"
+    augmented_combined.fillna("no value", inplace=True)
+
+    print("\n\n non-numeric added back with remaining rows with \"no value\" : ", augmented_combined)
+    print("\n\n check cheat flags between rows 480 and 520 in augmented_combined : ", augmented_combined[480:520])
 
     # Concatenate original and augmented data
-    combined_data = pd.concat([df, augmented_combined])
+    final_data = pd.concat([df, augmented_combined])
+
+    print("\n\n df : ", df)
+    print("\n\n augmented_combined : ", augmented_combined)
 
     # Drop ignore columns
-    combined_data.drop(columns=ignore_columns, inplace=True, errors='ignore')
+    final_data.drop(columns=ignore_columns, inplace=True, errors='ignore')
 
-    combined_data.to_csv(f'model_and_data/training_segment_metrics_augmented_{version}.csv', index=False)
+    print("\n final_data : ", final_data)
+    print("\n\n final_data : ", final_data['N_paste_events'])
+    print("\n\n final_data : ", final_data['N_copy_events'])
+
+    final_data.to_csv(f'model_and_data/training_segment_metrics_augmented_{version}.csv', index=False)
 
     if low_variance_features:
         print("Consider reviewing or removing the following low variance features:", low_variance_features)
 
     print("Distribution data and combined original and augmented data saved.")
-
 
 
 # Example usage
@@ -1091,7 +1173,7 @@ if __name__ == '__main__':
 
     
 
-    # ignore_feature_excluded = ['Final_text_length', 'N_keyboard_events', 'Ratio_combination', 'Ratio_delete','N_paste_events' ,'N_copy_events', 'Length_per_event', 'average_consecutive_backspaces', 'cps', 'average_thinking_time', 'pause_frequency', 'is_cheat_segment', 'title', 'project_id']
+    feature_to_consider = ['Final_text_length', 'N_keyboard_events', 'Ratio_combination', 'Ratio_delete','N_paste_events' ,'N_copy_events', 'Length_per_event', 'average_consecutive_backspaces', 'cps', 'average_thinking_time', 'pause_frequency', 'is_cheat_segment', 'title', 'project_id']
 
     # ignore these columns
     # start_time	segment_duration	text_state_change  title	project_id
@@ -1108,7 +1190,7 @@ if __name__ == '__main__':
     # print("ignore_feature_augmented : ", ignore_feature_augmented)
     # print("ignore_columns : ", ignore_columns)
     
-    version = "v1.1.0"
+    version = "v1.1.1"
 
 
     # transfer_labelled_data(user_project_mapping)
@@ -1127,9 +1209,9 @@ if __name__ == '__main__':
 
     from_file = True
 
-    mode = "train"
+    # mode = "train"
     # mode = "predict"
-    # mode = "evaluate"
+    mode = "evaluate"
 
 
     # Initialize the classifier
